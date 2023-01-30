@@ -1022,9 +1022,7 @@ void buildTS(
 	int tiles_w,
 	int tiles_h)
 {
-	if (loggingLevel >= 5) printf("Building tileset...\n");
 	stbhw_build_tileset_from_image(data, tiles_w * 3, tiles_w, tiles_h);
-	if (loggingLevel >= 5) printf("Tileset built successfully.\n");
 }
 __global__
 void freeTS()
@@ -1213,7 +1211,6 @@ extern "C" {
 
 		checkCudaErrors(cudaMemset(dValidBlock, 0, _worldSeedCount));
 
-		if (_loggingLevel >= 5) printf("Initializing PRNGs.\n");
 		blockInitRNG<<<NUMBLOCKS, BLOCKSIZE>>>(rngBlock1, rngBlock2);
 		checkCudaErrors(cudaDeviceSynchronize());
 
@@ -1229,37 +1226,30 @@ extern "C" {
 			if (tries > maxTries) break;
 
 			chrono::steady_clock::time_point time1 = chrono::steady_clock::now();
-			if (_loggingLevel >= 6) printf("Generating map.\n");
 			blockGenerateMap<<<NUMBLOCKS, BLOCKSIZE>>>(dResBlock, rngBlock1, rngBlock2, dValidBlock, tries == 0);
-			if (_loggingLevel >= 6) printf("Copying map.\n");
 			checkCudaErrors(cudaDeviceSynchronize());
 			blockMemcpyOffset<<<NUMBLOCKS, BLOCKSIZE>>>(dResBlock, dResultBlock, dValidBlock, tries == 0);
 			checkCudaErrors(cudaDeviceSynchronize());
 			
 			chrono::steady_clock::time_point time2 = chrono::steady_clock::now();
 
-			if (_loggingLevel >= 6) printf("Filling optional blocks.\n");
 			blockFillC0FFEE << <NUMBLOCKS, BLOCKSIZE >> > (dResultBlock, dValidBlock, dResBlock, dStackMem, tries == 0);
 			checkCudaErrors(cudaDeviceSynchronize());
 
 			if (_isCoalMine) {
-				if (_loggingLevel >= 6) printf("First coal mine hax.\n");
 				blockCoalMineHax << <NUMBLOCKS, BLOCKSIZE >> > (dResultBlock, dValidBlock, 1, tries == 0);
 				checkCudaErrors(cudaDeviceSynchronize());
 			}
 			if (_worldY < 20 && _worldX > 32 && _worldX < 39) {
-				if (_loggingLevel >= 6) printf("Blocking rooms.\n");
 				blockRoomBlock<<<NUMBLOCKS, BLOCKSIZE>>>(dResultBlock, dValidBlock, tries == 0);
 				checkCudaErrors(cudaDeviceSynchronize());
 			}
 			if (_isCoalMine) {
-				if (_loggingLevel >= 6) printf("Second coal mine hax.\n");
 				blockCoalMineHax << <NUMBLOCKS, BLOCKSIZE >> > (dResultBlock, dValidBlock, 2, tries == 0);
 				checkCudaErrors(cudaDeviceSynchronize());
 			}
 
 			chrono::steady_clock::time_point time3 = chrono::steady_clock::now();
-			if (_loggingLevel >= 6) printf("Verifying validity.\n");
 			blockIsValid<<<NUMBLOCKS, BLOCKSIZE>>>(dResultBlock, dValidBlock, dResBlock, dStackMem, tries == 0);
 			checkCudaErrors(cudaDeviceSynchronize());
 			checkCudaErrors(cudaMemcpy(validBlock, dValidBlock, _worldSeedCount, cudaMemcpyDeviceToHost));
@@ -1269,14 +1259,13 @@ extern "C" {
 			miscTime += chrono::duration_cast<chrono::milliseconds>(time3 - time2).count();
 			validateTime += chrono::duration_cast<chrono::milliseconds>(time4 - time3).count();
 
-			if (_loggingLevel >= 6) printf("Copying to RAM.\n");
 			checkCudaErrors(cudaMemcpy(resultBlock + 3 * _map_w * _map_h * tries, dResultBlock, 3 * _map_w * _map_h, cudaMemcpyDeviceToHost));
 
 			tries++;
 			stop = false;
 			int numBad = 0;
 			for (int j = 0; j < _worldSeedCount; j++) if (!validBlock[j]) { numBad++; }
-			if (numBad > 0) stop = false;
+			if (numBad > 0) stop = true;
 
 			if(_loggingLevel >= 3) printf("Try %i: Maps invalid: %i\n", tries, numBad);
 		}
@@ -1312,6 +1301,7 @@ extern "C" {
 	}
 }
 
+//I don't trust freeing memory in C#, better to just P/Invoke the pointer back to C++ and free it there
 extern "C" {
 	__declspec(dllexport) void free_array(void* block) {
 		free(block);
