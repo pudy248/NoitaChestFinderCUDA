@@ -577,6 +577,12 @@ int GetGlobalPosY(int x, int y, int px, int py)
 // 42 wand_T6
 // 43 wand_T6NS
 // 
+// 44 egg_purple
+// 45 egg_slime
+// 46 egg_monster
+// 47 broken_wand
+// 
+// 
 // 254 sampo
 // 255 orb
 
@@ -655,7 +661,6 @@ __device__ void CheckNormalChestLoot(int x, int y, uint worldSeed, byte* writeLo
 			byte opt = opts[rnd];
 			if (opt == 127)
 			{
-
 				byte r_opts [7] = {19, 20, 21, 22, 23, 24, 25};
 				rnd = random.Random(0, 6);
 				byte r_opt = r_opts[rnd];
@@ -768,6 +773,45 @@ __device__ void CheckGreatChestLoot(int x, int y, uint worldSeed, byte* writeLoc
 	*(writeLoc + 8) = (byte)idx;
 }
 
+__device__ void CheckItemPedestalLoot(int x, int y, uint worldSeed, byte* writeLoc) 
+{
+	writeUnalignedInt(writeLoc, x);
+	writeUnalignedInt(writeLoc + 4, y);
+	*(writeLoc + 8) = 1;
+	byte* contents = writeLoc + 9;
+
+	NoitaRandom random = NoitaRandom(worldSeed);
+	random.SetRandomSeed(x + 425, y - 243);
+	int rnd = random.Random(1, 91);
+
+	if (rnd <= 65)
+		contents[0] = 5;
+	else if (rnd <= 70)
+		contents[0] = 4;
+	else if (rnd <= 71)
+		contents[0] = 13;
+	else if (rnd <= 72) {
+		byte r_opts[7] = { 19, 20, 21, 22, 23, 24, 25 };
+		rnd = random.Random(0, 6);
+		byte r_opt = r_opts[rnd];
+		contents[0] = r_opt;
+	}
+	else if (rnd <= 73)
+		contents[0] = 44;
+	else if (rnd <= 77)
+		contents[0] = 45;
+	else if (rnd <= 79)
+		contents[0] = 46;
+	else if (rnd <= 83)
+		contents[0] = 16;
+	else if (rnd <= 85)
+		contents[0] = 15;
+	else if (rnd <= 89)
+		contents[0] = 47;
+	else
+		contents[0] = 14;
+}
+
 __device__ void spawnHeart(int x, int y, uint seed, byte* writeLoc) {
 	NoitaRandom random = NoitaRandom(seed);
 	if (loggingLevel >= 5) printf("Spawning heart: %i, %i\n", x, y);
@@ -806,6 +850,24 @@ __device__ void spawnChest(int x, int y, uint seed, byte greedCurse, byte* write
 		CheckGreatChestLoot(x, y, seed, writeLoc);
 	else
 		CheckNormalChestLoot(x, y, seed, writeLoc);
+}
+
+__device__ void spawnItem(int x, int y, uint seed, byte* writeLoc)
+{
+	//x+10, y+11
+	NoitaRandom random = NoitaRandom(seed);
+	if (loggingLevel >= 5) printf("Spawning item pedestal: %i, %i\n", x, y);
+	float rnd = random.ProceduralRandomf(x, y, 0, 1);
+
+	if (rnd > 0.65f)
+	{
+		if (loggingLevel >= 5) printf("Spawning item on pedestal: %i, %i\n", x+5, y-4);
+		CheckItemPedestalLoot(x + 5, y - 4, seed, writeLoc);
+	}
+	else {
+		writeUnalignedInt(writeLoc, -1);
+		writeUnalignedInt(writeLoc + 4, -1);
+	}
 }
 
 __global__
@@ -1016,7 +1078,8 @@ __global__ void blockCheckSpawnables(
 	byte* mapBlock,
 	byte* retArray,
 	byte* validBlock,
-	byte greedCurse) {
+	byte greedCurse,
+	byte checkItems) {
 	uint index = blockIdx.x * blockDim.x + threadIdx.x;
 	uint stride = blockDim.x * gridDim.x;
 	for (int idx = index; idx < worldSeedCount; idx += stride) {
@@ -1066,6 +1129,21 @@ __global__ void blockCheckSpawnables(
 							chestIdx++;
 						}
 					}
+					else if (checkItems > 0 && map[pixelPos] == 0x50 && map[pixelPos + 1] == 0xa0 && map[pixelPos + 2] == 0x00) {
+						for (int i = -pwCount; i <= pwCount; i++) {
+							if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
+								printf("Chest density exceeded in seed %i!\n", worldSeed);
+								densityExceeded = true;
+								break;
+							}
+
+							byte* c = retSegment + chestIdx * (9 + maxChestContents);
+							spawnItem(gpX + PWSize * i, gpY, worldSeed, c);
+							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
+							if (readUnalignedInt(c) != -1)
+								chestIdx++;
+						}
+					}
 					if (densityExceeded) break;
 				}
 				if (densityExceeded) break;
@@ -1093,7 +1171,8 @@ extern "C" {
 		byte _loggingLevel,
 		uint _maxChestContents,
 		uint _maxChestsPerWorld,
-		byte _greedCurse) 
+		byte _greedCurse,
+		byte _checkItems)
 	{
 		checkCudaErrors(cudaMemcpyToSymbol(map_w, &_map_w, sizeof(uint)));
 		checkCudaErrors(cudaMemcpyToSymbol(map_h, &_map_h, sizeof(uint)));
@@ -1213,7 +1292,7 @@ extern "C" {
 		byte* dRetArray;
 		checkCudaErrors(cudaMalloc((void**)&dRetArray, _worldSeedCount * ((9 + _maxChestContents) * (2 * _pwCount + 1) * _maxChestsPerWorld + sizeof(uint))));
 
-		blockCheckSpawnables<<<NUMBLOCKS, BLOCKSIZE >>>(dResultBlock, dRetArray, dValidBlock, _greedCurse);
+		blockCheckSpawnables<<<NUMBLOCKS, BLOCKSIZE >>>(dResultBlock, dRetArray, dValidBlock, _greedCurse, _checkItems);
 		checkCudaErrors(cudaDeviceSynchronize());
 
 		checkCudaErrors(cudaMemcpy(retArray, dRetArray, _worldSeedCount * ((9 + _maxChestContents) * (2 * _pwCount + 1) * _maxChestsPerWorld + sizeof(uint)), cudaMemcpyDeviceToHost));
