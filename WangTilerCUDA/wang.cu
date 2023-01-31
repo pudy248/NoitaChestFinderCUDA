@@ -812,7 +812,10 @@ __device__ void CheckItemPedestalLoot(int x, int y, uint worldSeed, byte* writeL
 		contents[0] = 14;
 }
 
-__device__ void spawnHeart(int x, int y, uint seed, byte* writeLoc) {
+__device__ void spawnHeart(int x, int y, uint seed, byte* writeLoc) 
+{
+	writeUnalignedInt(writeLoc, -1);
+	writeUnalignedInt(writeLoc + 4, -1);
 	NoitaRandom random = NoitaRandom(seed);
 	if (loggingLevel >= 5) printf("Spawning heart: %i, %i\n", x, y);
 	float r = random.ProceduralRandomf(x, y, 0, 1);
@@ -832,10 +835,6 @@ __device__ void spawnHeart(int x, int y, uint seed, byte* writeLoc) {
 				CheckNormalChestLoot(x, y, seed, writeLoc);
 		}
 	}
-	else {
-		writeUnalignedInt(writeLoc, -1);
-		writeUnalignedInt(writeLoc + 4, -1);
-	}
 }
 
 __device__ void spawnChest(int x, int y, uint seed, byte greedCurse, byte* writeLoc)
@@ -854,7 +853,8 @@ __device__ void spawnChest(int x, int y, uint seed, byte greedCurse, byte* write
 
 __device__ void spawnItem(int x, int y, uint seed, byte* writeLoc)
 {
-	//x+10, y+11
+	writeUnalignedInt(writeLoc, -1);
+	writeUnalignedInt(writeLoc + 4, -1);
 	NoitaRandom random = NoitaRandom(seed);
 	if (loggingLevel >= 5) printf("Spawning item pedestal: %i, %i\n", x, y);
 	float rnd = random.ProceduralRandomf(x, y, 0, 1);
@@ -864,11 +864,23 @@ __device__ void spawnItem(int x, int y, uint seed, byte* writeLoc)
 		if (loggingLevel >= 5) printf("Spawning item on pedestal: %i, %i\n", x+5, y-4);
 		CheckItemPedestalLoot(x + 5, y - 4, seed, writeLoc);
 	}
-	else {
-		writeUnalignedInt(writeLoc, -1);
-		writeUnalignedInt(writeLoc + 4, -1);
+}
+
+__device__ void spawnPixelScene(int x, int y, uint seed, byte greedCurse, byte* writeLoc)
+{
+	writeUnalignedInt(writeLoc, -1);
+	writeUnalignedInt(writeLoc + 4, -1);
+	NoitaRandom random = NoitaRandom(seed);
+	if (loggingLevel >= 5) printf("Spawning pixel scene: %i, %i\n", x, y);
+	int rnd = random.Random(1, 100);
+	if (rnd > 50) {
+		float rnd2 = random.ProceduralRandomf(x, y, 0, 3);
+		if (0.5f < rnd2 < 1) {
+			spawnChest(x + 94, y + 224, seed, greedCurse, writeLoc);
+		}
 	}
 }
+
 
 __global__
 void blockRoomBlock(
@@ -1127,6 +1139,20 @@ __global__ void blockCheckSpawnables(
 							chestIdx++;
 						}
 					}
+					else if (map[pixelPos] == 0xff && map[pixelPos + 1] == 0x0a && map[pixelPos + 2] == 0xff) {
+						for (int i = -pwCount; i <= pwCount; i++) {
+							if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
+								printf("Chest density exceeded in seed %i!\n", worldSeed);
+								densityExceeded = true;
+								break;
+							}
+
+							byte* c = retSegment + chestIdx * (9 + maxChestContents);
+							spawnPixelScene(gpX + PWSize * i, gpY, worldSeed, greedCurse, c);
+							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
+							chestIdx++;
+						}
+					}
 					else if (checkItems > 0 && map[pixelPos] == 0x50 && map[pixelPos + 1] == 0xa0 && map[pixelPos + 2] == 0x00) {
 						for (int i = -pwCount; i <= pwCount; i++) {
 							if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
@@ -1262,10 +1288,9 @@ extern "C" {
 			checkCudaErrors(cudaMemcpy(resultBlock + 3 * _map_w * _map_h * tries, dResultBlock, 3 * _map_w * _map_h, cudaMemcpyDeviceToHost));
 
 			tries++;
-			stop = false;
 			int numBad = 0;
 			for (int j = 0; j < _worldSeedCount; j++) if (!validBlock[j]) { numBad++; }
-			if (numBad > 0) stop = true;
+			stop = numBad == 0;
 
 			if(_loggingLevel >= 3) printf("Try %i: Maps invalid: %i\n", tries, numBad);
 		}
