@@ -866,16 +866,17 @@ __device__ void spawnItem(int x, int y, uint seed, byte* writeLoc)
 	}
 }
 
-__device__ void spawnPixelScene(int x, int y, uint seed, byte greedCurse, byte* writeLoc)
+__device__ void spawnPixelScene(int x, int y, uint seed, byte oiltank, byte greedCurse, byte* writeLoc)
 {
 	writeUnalignedInt(writeLoc, -1);
 	writeUnalignedInt(writeLoc + 4, -1);
 	NoitaRandom random = NoitaRandom(seed);
+	random.SetRandomSeed(x, y);
 	if (loggingLevel >= 5) printf("Spawning pixel scene: %i, %i\n", x, y);
 	int rnd = random.Random(1, 100);
-	if (rnd > 50) {
+	if (rnd <= 50 && oiltank == 0 || rnd > 50 && oiltank > 0) {
 		float rnd2 = random.ProceduralRandomf(x, y, 0, 3);
-		if (0.5f < rnd2 < 1) {
+		if (0.5f < rnd2 && rnd2 < 1) {
 			spawnChest(x + 94, y + 224, seed, greedCurse, writeLoc);
 		}
 	}
@@ -1148,7 +1149,21 @@ __global__ void blockCheckSpawnables(
 							}
 
 							byte* c = retSegment + chestIdx * (9 + maxChestContents);
-							spawnPixelScene(gpX + PWSize * i, gpY, worldSeed, greedCurse, c);
+							spawnPixelScene(gpX + PWSize * i, gpY, worldSeed, 0, greedCurse, c);
+							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
+							chestIdx++;
+						}
+					}
+					else if (map[pixelPos] == 0xc3 && map[pixelPos + 1] == 0x57 && map[pixelPos + 2] == 0x00) {
+						for (int i = -pwCount; i <= pwCount; i++) {
+							if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
+								printf("Chest density exceeded in seed %i!\n", worldSeed);
+								densityExceeded = true;
+								break;
+							}
+
+							byte* c = retSegment + chestIdx * (9 + maxChestContents);
+							spawnPixelScene(gpX + PWSize * i, gpY, worldSeed, 1, greedCurse, c);
 							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
 							chestIdx++;
 						}
