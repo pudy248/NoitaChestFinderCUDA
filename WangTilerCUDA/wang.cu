@@ -200,9 +200,9 @@ void fillC0ffee(
 	byte* visited,
 	intPair* stack)
 {
-	NollaPrng rng = NollaPrng(0);
+	NollaPrng rng = NollaPrng(world_seed);
 	rng.SetRandomFromWorldSeed(world_seed);
-	rng.Next();
+	//rng.Next();
 	for (int y = 0; y < map_h; y++)
 	{
 		for (int x = 0; x < map_w; x++)
@@ -812,6 +812,70 @@ __device__ void CheckItemPedestalLoot(int x, int y, uint worldSeed, byte* writeL
 		contents[0] = 14;
 }
 
+//data format
+// x... y... capacity multi reload shuffle delay mana... charge... spells. .. .. (...)
+// 0    4    8        9     10     11      12    13      17        21, 23, (...)
+__device__ void CheckWandStats(int x, int y, uint worldSeed, byte level, int baseCost, byte unshuffle, byte* writeLoc) 
+{
+	writeUnalignedInt(writeLoc, x);
+	writeUnalignedInt(writeLoc + 4, y);
+
+	NoitaRandom random = NoitaRandom(worldSeed);
+	random.SetRandomSeed(x, y);
+
+	int cost = baseCost;
+
+	if (level == 1) {
+		if (random.Random(0, 100) < 50) {
+			cost += 5;
+		}
+	}
+
+	cost += random.Random(-3, 3);
+	byte capacity = 0;
+	byte multi = 0;
+	signed char reload = 0;
+	byte shuffle = 1;
+	signed char delay = 0;
+	signed char spread = 0;
+	float speed = 0;
+	float prob_unshuffle = 0.1f;
+	float prob_draw_many = 0.15f;
+	int charge = 50 * level + random.Random(-5, 5 * level);
+	int mana = 50 + (150 * level) + random.Random(-5, 5) * 10;
+	byte force_unshuffle = 0;
+	byte is_rare = 0;
+
+	int p;
+	p = random.Random(0, 100);
+	if (p < 20) {
+		charge = (50 * level + random.Random(-5, 5 * level)) / 5;
+		mana = (50 + (150 * level) + (random.Random(-5, 5) * 10)) * 3;
+	}
+
+	p = random.Random(0, 100);
+	if (p < 15) {
+		charge = (50 * level + random.Random(-5, 5 * level)) * 5;
+		mana = (50 + (150 * level) + (random.Random(-5, 5) * 10)) / 3;
+	}
+
+	if (mana < 50) mana = 50;
+	if (charge < 10) charge = 10;
+
+	p = random.Random(0, 100);
+	if (p < 15 + level * 6) {
+		force_unshuffle = 1;
+	}
+
+	p = random.Random(0, 100);
+	if (p < 5) {
+		is_rare = 1;
+		cost += 65;
+	}
+
+	//finish later
+}
+
 __device__ void spawnHeart(int x, int y, uint seed, byte* writeLoc) 
 {
 	writeUnalignedInt(writeLoc, -1);
@@ -851,7 +915,7 @@ __device__ void spawnChest(int x, int y, uint seed, byte greedCurse, byte* write
 		CheckNormalChestLoot(x, y, seed, writeLoc);
 }
 
-__device__ void spawnItem(int x, int y, uint seed, byte* writeLoc)
+__device__ void spawnPotion(int x, int y, uint seed, byte* writeLoc)
 {
 	writeUnalignedInt(writeLoc, -1);
 	writeUnalignedInt(writeLoc + 4, -1);
@@ -875,13 +939,12 @@ __device__ void spawnPixelScene(int x, int y, uint seed, byte oiltank, byte gree
 	if (loggingLevel >= 5) printf("Spawning pixel scene: %i, %i\n", x, y);
 	int rnd = random.Random(1, 100);
 	if (rnd <= 50 && oiltank == 0 || rnd > 50 && oiltank > 0) {
-		float rnd2 = random.ProceduralRandomf(x, y, 0, 3);
+		float rnd2 = random.ProceduralRandomf(x, y, 0, 1) * 3;
 		if (0.5f < rnd2 && rnd2 < 1) {
 			spawnChest(x + 94, y + 224, seed, greedCurse, writeLoc);
 		}
 	}
 }
-
 
 __global__
 void blockRoomBlock(
@@ -1110,7 +1173,6 @@ __global__ void blockCheckSpawnables(
 					int gpY = GetGlobalPosY(worldX, worldY, px * 10, py * 10 - 40);
 
 					int PWSize = (ngPlus > 0 ? 64 : 70) * 512;
-
 					if (map[pixelPos] == 0x78 && map[pixelPos + 1] == 0xFF && map[pixelPos + 2] == 0xFF) {
 						for (int i = -pwCount; i <= pwCount; i++) {
 							if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
@@ -1136,7 +1198,7 @@ __global__ void blockCheckSpawnables(
 
 							byte* c = retSegment + chestIdx * (9 + maxChestContents);
 							spawnChest(gpX + PWSize * i, gpY, worldSeed, greedCurse, c);
-							if(loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
+							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
 							chestIdx++;
 						}
 					}
@@ -1177,7 +1239,7 @@ __global__ void blockCheckSpawnables(
 							}
 
 							byte* c = retSegment + chestIdx * (9 + maxChestContents);
-							spawnItem(gpX + PWSize * i, gpY, worldSeed, c);
+							spawnPotion(gpX + PWSize * i, gpY, worldSeed, c);
 							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
 							if (readUnalignedInt(c) != -1)
 								chestIdx++;
@@ -1193,7 +1255,7 @@ __global__ void blockCheckSpawnables(
 }
 
 extern "C" {
-	__declspec(dllexport) byte* generate_block(
+	__declspec(dllexport) byte** generate_block(
 		byte host_tileData[],
 		uint tiles_w,
 		uint tiles_h,
@@ -1281,6 +1343,7 @@ extern "C" {
 				blockCoalMineHax << <NUMBLOCKS, BLOCKSIZE >> > (dResultBlock, dValidBlock, 1, tries == 0);
 				checkCudaErrors(cudaDeviceSynchronize());
 			}
+
 			if (_worldY < 20 && _worldX > 32 && _worldX < 39) {
 				blockRoomBlock<<<NUMBLOCKS, BLOCKSIZE>>>(dResultBlock, dValidBlock, tries == 0);
 				checkCudaErrors(cudaDeviceSynchronize());
@@ -1295,12 +1358,13 @@ extern "C" {
 			checkCudaErrors(cudaDeviceSynchronize());
 			checkCudaErrors(cudaMemcpy(validBlock, dValidBlock, _worldSeedCount, cudaMemcpyDeviceToHost));
 
+			checkCudaErrors(cudaMemcpy(resultBlock, dResultBlock, 3 * _map_w * _map_h * _worldSeedCount, cudaMemcpyDeviceToHost));
+
 			chrono::steady_clock::time_point time4 = chrono::steady_clock::now();
 			mapgenTime += chrono::duration_cast<chrono::milliseconds>(time2 - time1).count();
 			miscTime += chrono::duration_cast<chrono::milliseconds>(time3 - time2).count();
 			validateTime += chrono::duration_cast<chrono::milliseconds>(time4 - time3).count();
 
-			checkCudaErrors(cudaMemcpy(resultBlock + 3 * _map_w * _map_h * tries, dResultBlock, 3 * _map_w * _map_h, cudaMemcpyDeviceToHost));
 
 			tries++;
 			int numBad = 0;
@@ -1329,7 +1393,6 @@ extern "C" {
 		checkCudaErrors(cudaFree(dResultBlock));
 		checkCudaErrors(cudaFree(dValidBlock));
 		checkCudaErrors(cudaFree(dRetArray));
-		free(resultBlock);
 
 		if (_loggingLevel >= 4) {
 			printf("WORLDGEN ACCUMULATED TIME: %lli ms\n", mapgenTime);
@@ -1337,7 +1400,11 @@ extern "C" {
 			printf("MISCELL. ACCUMULATED TIME: %lli ms\n", miscTime);
 		}
 
-		return retArray;
+		byte** retList = (byte**)malloc(sizeof(byte*) * 2);
+		retList[0] = retArray;
+		retList[1] = resultBlock;
+		return retList;
+		//free(resultBlock);
 	}
 }
 
