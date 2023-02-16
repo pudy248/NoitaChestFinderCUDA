@@ -11,7 +11,9 @@
 
 
 typedef unsigned int uint;
+#ifdef _MSC_VER
 typedef unsigned long long int ulong;
+#endif
 
 typedef uint8_t byte;
 typedef int8_t int8;
