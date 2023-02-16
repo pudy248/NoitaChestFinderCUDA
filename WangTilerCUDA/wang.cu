@@ -1261,7 +1261,12 @@ __global__ void blockCheckSpawnables(
 }
 
 extern "C" {
-	__declspec(dllexport) byte** generate_block(
+#ifdef _MSC_VER
+	__declspec(dllexport)
+#else
+	__attribute__((visibility("default")))
+#endif
+	 byte** generate_block(
 		byte host_tileData[],
 		uint tiles_w,
 		uint tiles_h,
@@ -1416,7 +1421,12 @@ extern "C" {
 
 //I don't trust freeing memory in C#, better to just P/Invoke the pointer back to C++ and free it there
 extern "C" {
-	__declspec(dllexport) void free_array(void* block) {
+#ifdef _MSC_VER
+	__declspec(dllexport)
+#else
+	__attribute__((visibility("default")))
+#endif
+		void free_array(void* block) {
 		free(block);
 	}
 }
