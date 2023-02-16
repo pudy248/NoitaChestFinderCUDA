@@ -531,6 +531,12 @@ int GetGlobalPosY(int x, int y, int px, int py)
 	return gy;
 }
 
+//why in god's name does the game store seed positions as 6 char strings???
+__host__ __device__ int roundRNGPos(int num) {
+	if (num < 1000000) return num;
+	else if (num < 10000000) return num - (num % 10) + (num % 10 > 5 ? 10 : 0);
+	else if (num < 100000000) return num - (num % 100) + (num % 100 > 5 ? 100 : 0);
+}
 
 // 0 gold_nuggets
 // 1 chest_to_gold
@@ -592,7 +598,7 @@ __device__ void CheckNormalChestLoot(int x, int y, uint worldSeed, byte* writeLo
 	writeUnalignedInt(writeLoc + 4, y);
 	byte* contents = writeLoc + 9;
 	NoitaRandom random = NoitaRandom(worldSeed);
-	random.SetRandomSeed(x, y);
+	random.SetRandomSeed(roundRNGPos(x), y);
 
 	int idx = 0;
 	int count = 1;
@@ -706,7 +712,7 @@ __device__ void CheckGreatChestLoot(int x, int y, uint worldSeed, byte* writeLoc
 	writeUnalignedInt(writeLoc + 4, y);
 	byte* contents = writeLoc + 9;
 	NoitaRandom random = NoitaRandom(worldSeed);
-	random.SetRandomSeed(x, y);
+	random.SetRandomSeed(roundRNGPos(x), y);
 
 	int idx = 0;
 	int count = 1;
