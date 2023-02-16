@@ -1,7 +1,6 @@
 #include <memory>
 #include <iostream>
 #include <chrono>
-#include <cuda/std/cmath>
 
 #include "cuda_runtime.h"
 #include "device_launch_parameters.h"
