@@ -535,6 +535,7 @@ __host__ __device__ int roundRNGPos(int num) {
 	if (num < 1000000) return num;
 	else if (num < 10000000) return num - (num % 10) + (num % 10 > 5 ? 10 : 0);
 	else if (num < 100000000) return num - (num % 100) + (num % 100 > 5 ? 100 : 0);
+	return num;
 }
 
 // 0 gold_nuggets
