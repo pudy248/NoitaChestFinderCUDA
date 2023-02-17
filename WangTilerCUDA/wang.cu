@@ -529,9 +529,9 @@ int GetGlobalPosY(int x, int y, int px, int py)
 
 //why in god's name does the game store seed positions as 6 char strings???
 __host__ __device__ int roundRNGPos(int num) {
-	if (num < 1000000) return num;
-	else if (num < 10000000) return num - (num % 10) + (num % 10 >= 5 ? 10 : 0);
-	else if (num < 100000000) return num - (num % 100) + (num % 100 >= 50 ? 100 : 0);
+	if (-1000000 < num && num < 1000000) return num;
+	else if (-10000000 < num && num < 10000000) return num - (num % 10) + (num % 10 >= 5 ? 10 : 0);
+	else if (-100000000 < num && num < 100000000) return num - (num % 100) + (num % 100 >= 50 ? 100 : 0);
 	return num;
 }
 
