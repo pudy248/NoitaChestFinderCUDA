@@ -37,23 +37,16 @@ __device__ __constant__ uint maxChestsPerWorld;
 __device__ __constant__ byte loggingLevel = 0;
 
 // pudy248 note: If more generation differences occur, this would be the place to start debugging.
-#define BCSize 16
+#define BCSize 9
 __device__ __constant__ unsigned long blockedColors[BCSize] = {
-	0x00ac33, //load_pixel_scene3
-	0x00ac64, //load_pixel_scene4
 	0x00ac6e, //load_pixel_scene4_alt
-	0x4e175e, //load_oiltank_alt
-	0x692e94, //load_pixel_scene_wide
 	0x70d79e, //load_gunpowderpool_01
-	0x70d7a0, //load_gunpowderpool_03
+	0x70d79f, //???
 	0x70d7a1, //load_gunpowderpool_04
 	0x7868ff, //load_gunpowderpool_02
-	0x822e5b, //load_pixel_scene_tall
-	0x97ab00, //load_pixel_scene5
 	0xc35700, //load_oiltank
-	0xc800ff, //load_pixel_scene_alt
-	0xc9d959, //load_pixel_scene5b
 	0xff0080, //load_pixel_scene2
+	0xff00ff, //???
 	0xff0aff, //load_pixel_scene
 }; 
 
@@ -199,9 +192,9 @@ void fillC0ffee(
 	byte* visited,
 	intPair* stack)
 {
-	NollaPrng rng = NollaPrng(world_seed);
+	NollaPrng rng = NollaPrng(0);
 	rng.SetRandomFromWorldSeed(world_seed);
-	//rng.Next();
+	rng.Next();
 	for (int y = 0; y < map_h; y++)
 	{
 		for (int x = 0; x < map_w; x++)
@@ -244,35 +237,39 @@ NollaPrng GetRNG(int map_w, uint world_seed)
 __device__
 void doCoalMineHax(
 	byte* map,
-	int phase,
 	int width,
 	int height)
 {
-	for (int i = 0; i < width * height * 3; i += 3)
+	for (int y = 0; y < height; y++)
 	{
-		long pix = createRGB(coalmine_overlay[i], coalmine_overlay[i + 1], coalmine_overlay[i + 2]);
-		if (phase == 2 && pix == 0x4000)
-		{ // green. Looks like air?
-			//pudy248 note: is not actually air, this is the main rock portion of the overlay
-			map[i] = 0xFF;
-			map[i + 1] = 0xFF;
-			map[i + 2] = 0xFF;
-		}
-		if (phase == 1 && pix == 0x0040)
-		{ // blue. Looks like air?
-			map[i] = 0x00;
-			map[i + 1] = 0x00;
-			map[i + 2] = 0x00;
-		}
-		if (phase == 1 && pix == 0xFEFEFE)
-		{ // white. Stairs. rock_static_intro
-			// But in the debug it's not shown?
-			// map[i] = 0x0a;
-			// map[i + 1] = 0x33;
-			// map[i + 2] = 0x44;
-			map[i] = 0xFF;
-			map[i + 1] = 0xFF;
-			map[i + 2] = 0xFF;
+		for (int x = 0; x < width; x++)
+		{
+			long o = getPos(256, 3, x, y);
+			long i = getPos(width, 3, x, y);
+			long pix = createRGB(coalmine_overlay[o], coalmine_overlay[o + 1], coalmine_overlay[o + 2]);
+			if (pix == 0x4000)
+			{ // green. Looks like air?
+				//pudy248 note: is not actually air, this is the main rock portion of the overlay
+				map[i] = 0xFF;
+				map[i + 1] = 0xFF;
+				map[i + 2] = 0xFF;
+			}
+			if (pix == 0x0040)
+			{ // blue. Looks like air?
+				map[i] = 0x00;
+				map[i + 1] = 0x00;
+				map[i + 2] = 0x00;
+			}
+			if (pix == 0xFEFEFE)
+			{ // white. Stairs. rock_static_intro
+				// But in the debug it's not shown?
+				// map[i] = 0x0a;
+				// map[i + 1] = 0x33;
+				// map[i + 2] = 0x44;
+				map[i] = 0xFF;
+				map[i + 1] = 0xFF;
+				map[i + 2] = 0xFF;
+			}
 		}
 	}
 }
@@ -373,7 +370,7 @@ public:
 		{
 			stackSize[threadIdx] = 0;
 			intPair n = Pop();
-			setPixelColor(map, map_w, n.x, n.y, COLOR_PURPLE);
+			if((n.x + n.y) % 2 == 0) setPixelColor(map, map_w, n.x, n.y, COLOR_PURPLE);
 			if (n.x != -1) {
 				if (atTarget(n))
 				{
@@ -415,7 +412,7 @@ public:
 	{
 		long c = getPixelColor(map, map_w, x, y);
 
-		return c == COLOR_BLACK00 || c == COLOR_BLACK02 || c == 0x2f554c;
+		return c == COLOR_BLACK00 || c == COLOR_COFFEE;
 	}
 	__device__ bool atTarget(intPair n)
 	{
@@ -533,8 +530,8 @@ int GetGlobalPosY(int x, int y, int px, int py)
 //why in god's name does the game store seed positions as 6 char strings???
 __host__ __device__ int roundRNGPos(int num) {
 	if (num < 1000000) return num;
-	else if (num < 10000000) return num - (num % 10) + (num % 10 > 5 ? 10 : 0);
-	else if (num < 100000000) return num - (num % 100) + (num % 100 > 5 ? 100 : 0);
+	else if (num < 10000000) return num - (num % 10) + (num % 10 >= 5 ? 10 : 0);
+	else if (num < 100000000) return num - (num % 100) + (num % 100 >= 50 ? 100 : 0);
 	return num;
 }
 
@@ -882,10 +879,8 @@ __device__ void CheckWandStats(int x, int y, uint worldSeed, byte level, int bas
 	//finish later
 }
 
-__device__ void spawnHeart(int x, int y, uint seed, byte* writeLoc) 
+__device__ void spawnHeart(int x, int y, uint seed, byte greedCurse, byte* writeLoc)
 {
-	writeUnalignedInt(writeLoc, -1);
-	writeUnalignedInt(writeLoc + 4, -1);
 	NoitaRandom random = NoitaRandom(seed);
 	if (loggingLevel >= 5) printf("Spawning heart: %i, %i\n", x, y);
 	float r = random.ProceduralRandomf(x, y, 0, 1);
@@ -921,10 +916,8 @@ __device__ void spawnChest(int x, int y, uint seed, byte greedCurse, byte* write
 		CheckNormalChestLoot(x, y, seed, writeLoc);
 }
 
-__device__ void spawnPotion(int x, int y, uint seed, byte* writeLoc)
+__device__ void spawnPotion(int x, int y, uint seed, byte greedCurse, byte* writeLoc)
 {
-	writeUnalignedInt(writeLoc, -1);
-	writeUnalignedInt(writeLoc + 4, -1);
 	NoitaRandom random = NoitaRandom(seed);
 	if (loggingLevel >= 5) printf("Spawning item pedestal: %i, %i\n", x, y);
 	float rnd = random.ProceduralRandomf(x, y, 0, 1);
@@ -938,8 +931,6 @@ __device__ void spawnPotion(int x, int y, uint seed, byte* writeLoc)
 
 __device__ void spawnPixelScene(int x, int y, uint seed, byte oiltank, byte greedCurse, byte* writeLoc)
 {
-	writeUnalignedInt(writeLoc, -1);
-	writeUnalignedInt(writeLoc + 4, -1);
 	NoitaRandom random = NoitaRandom(seed);
 	random.SetRandomSeed(x, y);
 	if (loggingLevel >= 5) printf("Spawning pixel scene: %i, %i\n", x, y);
@@ -950,6 +941,23 @@ __device__ void spawnPixelScene(int x, int y, uint seed, byte oiltank, byte gree
 			spawnChest(x + 94, y + 224, seed, greedCurse, writeLoc);
 		}
 	}
+}
+
+__device__ void spawnPixelScene1(int x, int y, uint seed, byte greedCurse, byte* writeLoc) {
+	spawnPixelScene(x, y, seed, 0, greedCurse, writeLoc);
+}
+
+__device__ void spawnOilTank(int x, int y, uint seed, byte greedCurse, byte* writeLoc) {
+	spawnPixelScene(x, y, seed, 1, greedCurse, writeLoc);
+}
+
+
+__device__ size_t sizeOfChest() {
+	return 9 + maxChestContents;
+}
+
+__device__ size_t sizeOfChestSegment() {
+	return sizeof(uint) + sizeOfChest() * maxChestsPerWorld * (2 * pwCount + 1);
 }
 
 __global__
@@ -1010,14 +1018,14 @@ void blockIsValid(
 			byte* mapSegment = mapBlock + idx * 3 * map_w * map_h;
 			byte* visitedSegment = sVisitedBlock + idx * map_w * map_h;
 			intPair* queueMemSegment = dQueueMem + idx * (map_w + map_h);
-			memset(visitedSegment, 0, worldSeedCount);
+			memset(visitedSegment, 0, map_w * map_h);
 
 			uint path_start_x = 0;
 			if (mainPath)
 			{
 				if (isCoalMines)
 				{
-					path_start_x = 0x8f;
+					path_start_x = 0x8e;
 				}
 				else
 				{
@@ -1039,7 +1047,7 @@ void blockIsValid(
 					else break;
 				}
 			}
-			//printf("--#%i x:%i\n", idx, x);
+
 			dSearch[threadIdx.x].map = mapSegment;
 			dSearch[threadIdx.x].visited = visitedSegment;
 			dSearch[threadIdx.x].queueMem = queueMemSegment;
@@ -1070,7 +1078,6 @@ __global__
 void blockCoalMineHax(
 	byte* block, 
 	byte* validBlock,
-	int phase,
 	bool skipValid)
 {
 	uint index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -1078,7 +1085,7 @@ void blockCoalMineHax(
 	for (int idx = index; idx < worldSeedCount; idx += stride) {
 		if (skipValid || !validBlock[idx]) {
 			byte* segment = block + (idx * (3 * map_w * map_h));
-			doCoalMineHax(segment, phase, map_w, map_h);
+			doCoalMineHax(segment, map_w, map_h);
 		}
 	}
 }
@@ -1099,6 +1106,19 @@ void blockInitRNG(
 }
 
 __global__
+void blockUpdateRNG(
+	NollaPrng* rngBlock1,
+	NollaPrng* rngBlock2)
+{
+	uint index = blockIdx.x * blockDim.x + threadIdx.x;
+	uint stride = blockDim.x * gridDim.x;
+	for (int idx = index; idx < worldSeedCount; idx += stride) {
+		rngBlock2[idx].Seed = rngBlock1[idx].Next() * 2147483645.0;
+		rngBlock2[idx].Next();
+	}
+}
+
+__global__
 void buildTS(
 	byte* data,
 	int tiles_w,
@@ -1115,8 +1135,7 @@ void freeTS()
 __global__
 void blockGenerateMap(
 	byte* resBlock,
-	NollaPrng* rngBlock1,
-	NollaPrng* rngBlock2,
+	NollaPrng* rngBlock,
 	byte* validBlock,
 	bool skipValid)
 {
@@ -1126,10 +1145,7 @@ void blockGenerateMap(
 		if (skipValid || !validBlock[idx]) {
 			byte* res = resBlock + idx * (3 * map_w * (map_h + 4));
 
-			rngBlock2[idx].Seed = rngBlock1[idx].Next() * 2147483645.0;
-			rngBlock2[idx].Next();
-
-			stbhw_generate_image(res, map_w * 3, map_w, map_h + 4, &StaticRandom, rngBlock2 + idx);
+			stbhw_generate_image(res, map_w * 3, map_w, map_h + 4, &StaticRandom, rngBlock + idx);
 		}
 	}
 }
@@ -1163,12 +1179,16 @@ __global__ void blockCheckSpawnables(
 	uint index = blockIdx.x * blockDim.x + threadIdx.x;
 	uint stride = blockDim.x * gridDim.x;
 	for (int idx = index; idx < worldSeedCount; idx += stride) {
+		byte* retSegment = retArray + idx * sizeOfChestSegment();
+		memset(retSegment, 0, sizeOfChestSegment());
 		if (validBlock[idx]) {
 			uint worldSeed = worldSeedStart + idx;
 			byte* map = mapBlock + idx * (3 * map_w * map_h);
-			byte* retSegment = retArray + idx * ((9 + maxChestContents) * (2 * pwCount + 1) * maxChestsPerWorld + sizeof(uint)) + sizeof(uint);
 			int chestIdx = 0;
 			bool densityExceeded = false;
+
+			void (*spawnFuncs[5])(int, int, uint, byte, byte*) = { spawnHeart, spawnChest, spawnPixelScene1, spawnOilTank, spawnPotion };
+
 			for (int px = 0; px < map_w; px++)
 			{
 				for (int py = 0; py < map_h; py++)
@@ -1179,83 +1199,57 @@ __global__ void blockCheckSpawnables(
 					int gpY = GetGlobalPosY(worldX, worldY, px * 10, py * 10 - 40);
 
 					int PWSize = (ngPlus > 0 ? 64 : 70) * 512;
-					if (map[pixelPos] == 0x78 && map[pixelPos + 1] == 0xFF && map[pixelPos + 2] == 0xFF) {
-						for (int i = -pwCount; i <= pwCount; i++) {
-							if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
-								printf("Chest density exceeded in seed %i!\n", worldSeed);
-								densityExceeded = true;
-								break;
-							}
 
-							byte* c = retSegment + chestIdx * (9 + maxChestContents);
-							spawnHeart(gpX + PWSize * i, gpY, worldSeed, c);
-							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
-							if (readUnalignedInt(c) != -1)
-								chestIdx++;
-						}
+					//avoids having to switch every loop
+					auto func = spawnFuncs[0];
+					long pix = createRGB(map[pixelPos], map[pixelPos + 1], map[pixelPos + 2]);
+
+					switch (pix) {
+					case 0x78ffff:
+						func = spawnFuncs[0];
+						break;
+					case 0x55ff8c:
+						func = spawnFuncs[1];
+						break;
+					case 0xff0aff:
+						func = spawnFuncs[2];
+						break;
+					case 0xc35700:
+						func = spawnFuncs[3];
+						break;
+					case 0x50a000:
+						if (checkItems > 0)
+							func = spawnFuncs[4];
+						else continue;
+						break;
+					default:
+						continue;
 					}
-					else if (map[pixelPos] == 0x55 && map[pixelPos + 1] == 0xff && map[pixelPos + 2] == 0x8c) {
-						for (int i = -pwCount; i <= pwCount; i++) {
-							if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
-								printf("Chest density exceeded in seed %i!\n", worldSeed);
-								densityExceeded = true;
-								break;
-							}
 
-							byte* c = retSegment + chestIdx * (9 + maxChestContents);
-							spawnChest(gpX + PWSize * i, gpY, worldSeed, greedCurse, c);
-							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
+					for (int i = -pwCount; i <= pwCount; i++) {
+						if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
+							printf("Chest density exceeded in seed %i, with chest count above %i!\n", worldSeed, chestIdx);
+							densityExceeded = true;
+							break;
+						}
+						byte* c = retSegment + 4 + chestIdx * sizeOfChest();
+
+						writeUnalignedInt(c, -1);
+						writeUnalignedInt(c + 4, -1);
+						*(c + 8) = 0;
+
+						func(gpX + PWSize * i, gpY, worldSeed, greedCurse, c);
+
+						if (readUnalignedInt(c) != -1) {
+							if (loggingLevel >= 5) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
 							chestIdx++;
-						}
-					}
-					else if (map[pixelPos] == 0xff && map[pixelPos + 1] == 0x0a && map[pixelPos + 2] == 0xff) {
-						for (int i = -pwCount; i <= pwCount; i++) {
-							if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
-								printf("Chest density exceeded in seed %i!\n", worldSeed);
-								densityExceeded = true;
-								break;
-							}
-
-							byte* c = retSegment + chestIdx * (9 + maxChestContents);
-							spawnPixelScene(gpX + PWSize * i, gpY, worldSeed, 0, greedCurse, c);
-							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
-							chestIdx++;
-						}
-					}
-					else if (map[pixelPos] == 0xc3 && map[pixelPos + 1] == 0x57 && map[pixelPos + 2] == 0x00) {
-						for (int i = -pwCount; i <= pwCount; i++) {
-							if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
-								printf("Chest density exceeded in seed %i!\n", worldSeed);
-								densityExceeded = true;
-								break;
-							}
-
-							byte* c = retSegment + chestIdx * (9 + maxChestContents);
-							spawnPixelScene(gpX + PWSize * i, gpY, worldSeed, 1, greedCurse, c);
-							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
-							chestIdx++;
-						}
-					}
-					else if (checkItems > 0 && map[pixelPos] == 0x50 && map[pixelPos + 1] == 0xa0 && map[pixelPos + 2] == 0x00) {
-						for (int i = -pwCount; i <= pwCount; i++) {
-							if (chestIdx >= (2 * pwCount + 1) * maxChestsPerWorld) {
-								printf("Chest density exceeded in seed %i!\n", worldSeed);
-								densityExceeded = true;
-								break;
-							}
-
-							byte* c = retSegment + chestIdx * (9 + maxChestContents);
-							spawnPotion(gpX + PWSize * i, gpY, worldSeed, c);
-							if (loggingLevel >= 6) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
-							if (readUnalignedInt(c) != -1)
-								chestIdx++;
 						}
 					}
 					if (densityExceeded) break;
 				}
 				if (densityExceeded) break;
 			}
-			writeUnalignedInt(retSegment - 4, chestIdx);
+			writeUnalignedInt(retSegment, chestIdx);
 		}
 	}
 }
@@ -1330,52 +1324,37 @@ extern "C" {
 
 		bool stop = false;
 
-		long long int mapgenTime = 0;
-		long long int miscTime = 0;
-		long long int validateTime = 0;
-
 		int tries = 0;
 		if (_loggingLevel >= 5) printf("Beginning generation attempts.\n");
 		while (!stop) {
-			if (tries > maxTries) break;
+			//chrono::steady_clock::time_point time1 = chrono::steady_clock::now();
+			if (tries >= maxTries) break;
+			bool skipValid = tries == 0;
 
-			chrono::steady_clock::time_point time1 = chrono::steady_clock::now();
-			blockGenerateMap<<<NUMBLOCKS, BLOCKSIZE>>>(dResBlock, rngBlock1, rngBlock2, dValidBlock, tries == 0);
+			blockUpdateRNG << <NUMBLOCKS, BLOCKSIZE >> > (rngBlock1, rngBlock2);
 			checkCudaErrors(cudaDeviceSynchronize());
-			blockMemcpyOffset<<<NUMBLOCKS, BLOCKSIZE>>>(dResBlock, dResultBlock, dValidBlock, tries == 0);
-			checkCudaErrors(cudaDeviceSynchronize());
-			
-			chrono::steady_clock::time_point time2 = chrono::steady_clock::now();
 
-			blockFillC0FFEE << <NUMBLOCKS, BLOCKSIZE >> > (dResultBlock, dValidBlock, dResBlock, dStackMem, tries == 0);
+			blockGenerateMap<<<NUMBLOCKS, BLOCKSIZE>>>(dResBlock, rngBlock2, dValidBlock, skipValid);
+			checkCudaErrors(cudaDeviceSynchronize());
+			blockMemcpyOffset<<<NUMBLOCKS, BLOCKSIZE>>>(dResBlock, dResultBlock, dValidBlock, skipValid);
 			checkCudaErrors(cudaDeviceSynchronize());
 
 			if (_isCoalMine) {
-				blockCoalMineHax << <NUMBLOCKS, BLOCKSIZE >> > (dResultBlock, dValidBlock, 1, tries == 0);
+				blockCoalMineHax << <NUMBLOCKS, BLOCKSIZE >> > (dResultBlock, dValidBlock, skipValid);
 				checkCudaErrors(cudaDeviceSynchronize());
 			}
 
 			if (_worldY < 20 && _worldX > 32 && _worldX < 39) {
-				blockRoomBlock<<<NUMBLOCKS, BLOCKSIZE>>>(dResultBlock, dValidBlock, tries == 0);
-				checkCudaErrors(cudaDeviceSynchronize());
-			}
-			if (_isCoalMine) {
-				blockCoalMineHax << <NUMBLOCKS, BLOCKSIZE >> > (dResultBlock, dValidBlock, 2, tries == 0);
+				blockRoomBlock<<<NUMBLOCKS, BLOCKSIZE>>>(dResultBlock, dValidBlock, skipValid);
 				checkCudaErrors(cudaDeviceSynchronize());
 			}
 
-			chrono::steady_clock::time_point time3 = chrono::steady_clock::now();
-			blockIsValid<<<NUMBLOCKS, BLOCKSIZE>>>(dResultBlock, dValidBlock, dResBlock, dStackMem, tries == 0);
+			blockIsValid<<<NUMBLOCKS, BLOCKSIZE>>>(dResultBlock, dValidBlock, dResBlock, dStackMem, skipValid);
 			checkCudaErrors(cudaDeviceSynchronize());
+
 			checkCudaErrors(cudaMemcpy(validBlock, dValidBlock, _worldSeedCount, cudaMemcpyDeviceToHost));
 
 			checkCudaErrors(cudaMemcpy(resultBlock, dResultBlock, 3 * _map_w * _map_h * _worldSeedCount, cudaMemcpyDeviceToHost));
-
-			chrono::steady_clock::time_point time4 = chrono::steady_clock::now();
-			mapgenTime += chrono::duration_cast<chrono::milliseconds>(time2 - time1).count();
-			miscTime += chrono::duration_cast<chrono::milliseconds>(time3 - time2).count();
-			validateTime += chrono::duration_cast<chrono::milliseconds>(time4 - time3).count();
-
 
 			tries++;
 			int numBad = 0;
@@ -1392,30 +1371,23 @@ extern "C" {
 		checkCudaErrors(cudaDeviceSynchronize());
 		free(validBlock);
 
-		byte* retArray = (byte*)malloc(_worldSeedCount * ((9 + _maxChestContents) * (2 * _pwCount + 1) * _maxChestsPerWorld + sizeof(uint)));
+		byte* retArray = (byte*)malloc(_worldSeedCount * (sizeof(uint) + (9 + _maxChestContents) * _maxChestsPerWorld * (2 * _pwCount + 1)));
 		byte* dRetArray;
-		checkCudaErrors(cudaMalloc((void**)&dRetArray, _worldSeedCount * ((9 + _maxChestContents) * (2 * _pwCount + 1) * _maxChestsPerWorld + sizeof(uint))));
+		checkCudaErrors(cudaMalloc((void**)&dRetArray, _worldSeedCount * (sizeof(uint) + (9 + _maxChestContents) * _maxChestsPerWorld * (2 * _pwCount + 1))));
 
 		blockCheckSpawnables<<<NUMBLOCKS, BLOCKSIZE >>>(dResultBlock, dRetArray, dValidBlock, _greedCurse, _checkItems);
 		checkCudaErrors(cudaDeviceSynchronize());
 
-		checkCudaErrors(cudaMemcpy(retArray, dRetArray, _worldSeedCount * ((9 + _maxChestContents) * (2 * _pwCount + 1) * _maxChestsPerWorld + sizeof(uint)), cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpy(retArray, dRetArray, _worldSeedCount * (sizeof(uint) + (9 + _maxChestContents) * _maxChestsPerWorld * (2 * _pwCount + 1)), cudaMemcpyDeviceToHost));
 
 		checkCudaErrors(cudaFree(dResultBlock));
 		checkCudaErrors(cudaFree(dValidBlock));
 		checkCudaErrors(cudaFree(dRetArray));
 
-		if (_loggingLevel >= 4) {
-			printf("WORLDGEN ACCUMULATED TIME: %lli ms\n", mapgenTime);
-			printf("VALIDATE ACCUMULATED TIME: %lli ms\n", validateTime);
-			printf("MISCELL. ACCUMULATED TIME: %lli ms\n", miscTime);
-		}
-
 		byte** retList = (byte**)malloc(sizeof(byte*) * 2);
 		retList[0] = retArray;
 		retList[1] = resultBlock;
 		return retList;
-		//free(resultBlock);
 	}
 }
 
