@@ -18,6 +18,9 @@
   <ItemGroup>
     <CudaCompile Include="wang.cu" />
   </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="spells.h" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{B7511EBD-F721-46ED-BBF3-46ECBE0AE7DC}</ProjectGuid>
     <RootNamespace>WangTilerCUDA</RootNamespace>

@@ -8,6 +8,7 @@
 #include "noita_random.h"
 #include "stb_hbwang.h"
 #include "coalhax.h"
+#include "spells.h"
 
 //TODO fiddle with these to maximize performance, not sure what the correct configuration is
 #define NUMBLOCKS 512
@@ -585,11 +586,29 @@ __host__ __device__ int roundRNGPos(int num) {
 // 46 egg_monster
 // 47 broken_wand
 // 
+// random spell: 1xxxxxx0
+// xxxxx = # of random calls to make
 // 
-// 254 sampo
+// 253 sampo
 // 255 orb
 
-__device__ void CheckNormalChestLoot(int x, int y, uint worldSeed, byte* writeLoc)
+__device__ int MakeRandomCard(NoitaRandom* random) {
+	int res = 0;
+	char valid = 0;
+	while (valid == 0) {
+		int itemno = random->Random(0, 392);
+		Spell item = all_spells[itemno];
+		double sum = 0;
+		for (int i = 0; i < 11; i++) sum += item.spawn_probabilities[i];
+		if (sum > 0) {
+			valid = 1;
+			res = itemno;
+		}
+	}
+	return res;
+}
+
+__device__ void CheckNormalChestLoot(int x, int y, uint worldSeed, byte expandSpells, byte* writeLoc)
 {
 	writeUnalignedInt(writeLoc, x);
 	writeUnalignedInt(writeLoc + 4, y);
@@ -674,7 +693,28 @@ __device__ void CheckNormalChestLoot(int x, int y, uint worldSeed, byte* writeLo
 				contents[idx++] = opt;
 			}
 		}
-		else if (rnd <= 65) contents[idx++] = 26;
+		else if (rnd <= 65) 
+		{
+			int amount = 1;
+			int rnd2 = random.Random(0, 100);
+			if (rnd2 <= 50) amount = 1;
+			else if (rnd2 <= 70) amount += 1;
+			else if (rnd2 <= 80) amount += 2;
+			else if (rnd2 <= 90) amount += 3;
+			else amount += 4;
+
+			for (int i = 0; i < amount; i++) {
+				random.Random(0, 1);
+				if (expandSpells > 0) {
+					int randCTR = random.randomCTR;
+					contents[idx++] = (randCTR << 1) | 0x80;
+				}
+				MakeRandomCard(&random);
+			}
+
+			if(expandSpells == 0)
+				contents[idx++] = 26;
+		}
 		else if (rnd <= 84)
 		{
 			rnd = random.Random(0, 100);
@@ -815,71 +855,7 @@ __device__ void CheckItemPedestalLoot(int x, int y, uint worldSeed, byte* writeL
 		contents[0] = 14;
 }
 
-//data format
-// x... y... capacity multi reload shuffle delay mana... charge... spells. .. .. (...)
-// 0    4    8        9     10     11      12    13      17        21, 23, (...)
-__device__ void CheckWandStats(int x, int y, uint worldSeed, byte level, int baseCost, byte unshuffle, byte* writeLoc) 
-{
-	writeUnalignedInt(writeLoc, x);
-	writeUnalignedInt(writeLoc + 4, y);
-
-	NoitaRandom random = NoitaRandom(worldSeed);
-	random.SetRandomSeed(x, y);
-
-	int cost = baseCost;
-
-	if (level == 1) {
-		if (random.Random(0, 100) < 50) {
-			cost += 5;
-		}
-	}
-
-	cost += random.Random(-3, 3);
-	byte capacity = 0;
-	byte multi = 0;
-	signed char reload = 0;
-	byte shuffle = 1;
-	signed char delay = 0;
-	signed char spread = 0;
-	float speed = 0;
-	float prob_unshuffle = 0.1f;
-	float prob_draw_many = 0.15f;
-	int charge = 50 * level + random.Random(-5, 5 * level);
-	int mana = 50 + (150 * level) + random.Random(-5, 5) * 10;
-	byte force_unshuffle = 0;
-	byte is_rare = 0;
-
-	int p;
-	p = random.Random(0, 100);
-	if (p < 20) {
-		charge = (50 * level + random.Random(-5, 5 * level)) / 5;
-		mana = (50 + (150 * level) + (random.Random(-5, 5) * 10)) * 3;
-	}
-
-	p = random.Random(0, 100);
-	if (p < 15) {
-		charge = (50 * level + random.Random(-5, 5 * level)) * 5;
-		mana = (50 + (150 * level) + (random.Random(-5, 5) * 10)) / 3;
-	}
-
-	if (mana < 50) mana = 50;
-	if (charge < 10) charge = 10;
-
-	p = random.Random(0, 100);
-	if (p < 15 + level * 6) {
-		force_unshuffle = 1;
-	}
-
-	p = random.Random(0, 100);
-	if (p < 5) {
-		is_rare = 1;
-		cost += 65;
-	}
-
-	//finish later
-}
-
-__device__ void spawnHeart(int x, int y, uint seed, byte greedCurse, byte* writeLoc)
+__device__ void spawnHeart(int x, int y, uint seed, byte greedCurse, byte expandSpells, byte* writeLoc)
 {
 	NoitaRandom random = NoitaRandom(seed);
 	if (loggingLevel >= 5) printf("Spawning heart: %i, %i\n", x, y);
@@ -897,12 +873,12 @@ __device__ void spawnHeart(int x, int y, uint seed, byte greedCurse, byte* write
 			if (rnd >= 1000)
 				CheckGreatChestLoot(x, y, seed, writeLoc);
 			else 
-				CheckNormalChestLoot(x, y, seed, writeLoc);
+				CheckNormalChestLoot(x, y, seed, expandSpells, writeLoc);
 		}
 	}
 }
 
-__device__ void spawnChest(int x, int y, uint seed, byte greedCurse, byte* writeLoc)
+__device__ void spawnChest(int x, int y, uint seed, byte greedCurse, byte expandSpells, byte* writeLoc)
 {
 	NoitaRandom random = NoitaRandom(seed);
 	if(loggingLevel >= 5) printf("Spawning guaranteed chest: %i, %i\n", x, y);
@@ -913,10 +889,10 @@ __device__ void spawnChest(int x, int y, uint seed, byte greedCurse, byte* write
 	if (rnd >= super_chest_spawn_rate - 1)
 		CheckGreatChestLoot(x, y, seed, writeLoc);
 	else
-		CheckNormalChestLoot(x, y, seed, writeLoc);
+		CheckNormalChestLoot(x, y, seed, expandSpells, writeLoc);
 }
 
-__device__ void spawnPotion(int x, int y, uint seed, byte greedCurse, byte* writeLoc)
+__device__ void spawnPotion(int x, int y, uint seed, byte greedCurse, byte expandSpells, byte* writeLoc)
 {
 	NoitaRandom random = NoitaRandom(seed);
 	if (loggingLevel >= 5) printf("Spawning item pedestal: %i, %i\n", x, y);
@@ -929,7 +905,7 @@ __device__ void spawnPotion(int x, int y, uint seed, byte greedCurse, byte* writ
 	}
 }
 
-__device__ void spawnPixelScene(int x, int y, uint seed, byte oiltank, byte greedCurse, byte* writeLoc)
+__device__ void spawnPixelScene(int x, int y, uint seed, byte oiltank, byte greedCurse, byte expandSpells, byte* writeLoc)
 {
 	NoitaRandom random = NoitaRandom(seed);
 	random.SetRandomSeed(x, y);
@@ -938,17 +914,17 @@ __device__ void spawnPixelScene(int x, int y, uint seed, byte oiltank, byte gree
 	if (rnd <= 50 && oiltank == 0 || rnd > 50 && oiltank > 0) {
 		float rnd2 = random.ProceduralRandomf(x, y, 0, 1) * 3;
 		if (0.5f < rnd2 && rnd2 < 1) {
-			spawnChest(x + 94, y + 224, seed, greedCurse, writeLoc);
+			spawnChest(x + 94, y + 224, seed, greedCurse, expandSpells, writeLoc);
 		}
 	}
 }
 
-__device__ void spawnPixelScene1(int x, int y, uint seed, byte greedCurse, byte* writeLoc) {
-	spawnPixelScene(x, y, seed, 0, greedCurse, writeLoc);
+__device__ void spawnPixelScene1(int x, int y, uint seed, byte greedCurse, byte expandSpells, byte* writeLoc) {
+	spawnPixelScene(x, y, seed, 0, greedCurse, expandSpells, writeLoc);
 }
 
-__device__ void spawnOilTank(int x, int y, uint seed, byte greedCurse, byte* writeLoc) {
-	spawnPixelScene(x, y, seed, 1, greedCurse, writeLoc);
+__device__ void spawnOilTank(int x, int y, uint seed, byte greedCurse, byte expandSpells, byte* writeLoc) {
+	spawnPixelScene(x, y, seed, 1, greedCurse, expandSpells, writeLoc);
 }
 
 
@@ -1175,7 +1151,8 @@ __global__ void blockCheckSpawnables(
 	byte* retArray,
 	byte* validBlock,
 	byte greedCurse,
-	byte checkItems) {
+	byte checkItems,
+	byte expandSpells) {
 	uint index = blockIdx.x * blockDim.x + threadIdx.x;
 	uint stride = blockDim.x * gridDim.x;
 	for (int idx = index; idx < worldSeedCount; idx += stride) {
@@ -1187,7 +1164,7 @@ __global__ void blockCheckSpawnables(
 			int chestIdx = 0;
 			bool densityExceeded = false;
 
-			void (*spawnFuncs[5])(int, int, uint, byte, byte*) = { spawnHeart, spawnChest, spawnPixelScene1, spawnOilTank, spawnPotion };
+			void (*spawnFuncs[5])(int, int, uint, byte, byte, byte*) = { spawnHeart, spawnChest, spawnPixelScene1, spawnOilTank, spawnPotion };
 
 			for (int px = 0; px < map_w; px++)
 			{
@@ -1238,7 +1215,7 @@ __global__ void blockCheckSpawnables(
 						writeUnalignedInt(c + 4, -1);
 						*(c + 8) = 0;
 
-						func(gpX + PWSize * i, gpY, worldSeed, greedCurse, c);
+						func(gpX + PWSize * i, gpY, worldSeed, greedCurse, expandSpells, c);
 
 						if (readUnalignedInt(c) != -1) {
 							if (loggingLevel >= 5) printf("Chest (%i %i) -> %i %i: %i\n", gpX, gpY, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
@@ -1278,7 +1255,8 @@ extern "C" {
 		uint _maxChestContents,
 		uint _maxChestsPerWorld,
 		byte _greedCurse,
-		byte _checkItems)
+		byte _checkItems,
+		byte _expandSpells)
 	{
 		checkCudaErrors(cudaMemcpyToSymbol(map_w, &_map_w, sizeof(uint)));
 		checkCudaErrors(cudaMemcpyToSymbol(map_h, &_map_h, sizeof(uint)));
@@ -1375,7 +1353,7 @@ extern "C" {
 		byte* dRetArray;
 		checkCudaErrors(cudaMalloc((void**)&dRetArray, _worldSeedCount * (sizeof(uint) + (9 + _maxChestContents) * _maxChestsPerWorld * (2 * _pwCount + 1))));
 
-		blockCheckSpawnables<<<NUMBLOCKS, BLOCKSIZE >>>(dResultBlock, dRetArray, dValidBlock, _greedCurse, _checkItems);
+		blockCheckSpawnables<<<NUMBLOCKS, BLOCKSIZE >>>(dResultBlock, dRetArray, dValidBlock, _greedCurse, _checkItems, _expandSpells);
 		checkCudaErrors(cudaDeviceSynchronize());
 
 		checkCudaErrors(cudaMemcpy(retArray, dRetArray, _worldSeedCount * (sizeof(uint) + (9 + _maxChestContents) * _maxChestsPerWorld * (2 * _pwCount + 1)), cudaMemcpyDeviceToHost));

@@ -227,6 +227,8 @@ __device__ uint StaticRandom(NollaPrng* prng) {
 class NoitaRandom
 {
 public:
+	int randomCTR = 0;
+
 	__host__ __device__
 	NoitaRandom(uint worldSeed)
 	{
@@ -388,6 +390,7 @@ public:
 	__host__ __device__
 	int Random(int a, int b)
 	{
+		randomCTR++;
 		return a + (int)((b + 1 - a) * Next());
 	}
 
