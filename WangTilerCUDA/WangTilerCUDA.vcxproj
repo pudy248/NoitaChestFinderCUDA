@@ -14,12 +14,13 @@
     <ClInclude Include="coalhax.h" />
     <ClInclude Include="noita_random.h" />
     <ClInclude Include="stb_hbwang.h" />
+    <ClInclude Include="wand_levels.h" />
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="wang.cu" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="spells.h" />
+    <ClInclude Include="spells.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{B7511EBD-F721-46ED-BBF3-46ECBE0AE7DC}</ProjectGuid>

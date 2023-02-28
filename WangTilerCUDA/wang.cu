@@ -9,6 +9,7 @@
 #include "stb_hbwang.h"
 #include "coalhax.h"
 #include "spells.h"
+#include "wand_levels.h"
 
 //TODO fiddle with these to maximize performance, not sure what the correct configuration is
 #define NUMBLOCKS 512
@@ -36,6 +37,7 @@ __device__ __constant__ byte ngPlus = 0;
 __device__ __constant__ uint maxChestContents;
 __device__ __constant__ uint maxChestsPerWorld;
 __device__ __constant__ byte loggingLevel = 0;
+__device__ __constant__ byte biomeIndex = 0;
 
 // pudy248 note: If more generation differences occur, this would be the place to start debugging.
 #define BCSize 9
@@ -586,6 +588,14 @@ __host__ __device__ int roundRNGPos(int num) {
 // 46 egg_monster
 // 47 broken_wand
 // 
+// 64 wand_T10NS
+// 65 wand_T1B
+// 66 wand_T2B
+// 67 wand_T3B
+// 68 wand_T4B
+// 69 wand_T5B
+// 70 wand_T6B
+// 
 // random spell: 1xxxxxx0
 // xxxxx = # of random calls to make
 // 
@@ -758,7 +768,7 @@ __device__ void CheckGreatChestLoot(int x, int y, uint worldSeed, byte* writeLoc
 	{
 		count = 0;
 		if (random.Random(0, 1000) == 999) contents[idx++] = 255;
-		else contents[idx++] = 254;
+		else contents[idx++] = 253;
 	}
 
 	while (count != 0)
@@ -927,6 +937,30 @@ __device__ void spawnOilTank(int x, int y, uint seed, byte greedCurse, byte expa
 	spawnPixelScene(x, y, seed, 1, greedCurse, expandSpells, writeLoc);
 }
 
+__device__ void spawnWand(int x, int y, uint seed, byte greedCurse, byte expandSpells, byte* writeLoc) {
+	NoitaRandom random = NoitaRandom(seed);
+	float r = random.ProceduralRandomf(x, y, 0, 1);
+	if (r < 0.47) return;
+	r = random.ProceduralRandomf(x - 11.431, y + 10.5257, 0, 1);
+	if (r < 0.755) return;
+
+	int nx = x - 5;
+	int ny = y - 14;
+	BiomeWands wandSet = wandLevels[biomeIndex];
+	int sum = 0;
+	for (int i = 0; i < wandSet.count; i++) sum += wandSet.levels[i].prob;
+	r = random.ProceduralRandomf(nx, ny, 0, 1) * sum;
+	for (int i = 0; i < wandSet.count; i++) {
+		if (r <= wandSet.levels[i].prob) {
+			writeUnalignedInt(writeLoc, nx+5);
+			writeUnalignedInt(writeLoc + 4, ny+5);
+			*(writeLoc + 8) = 1;
+			*(writeLoc + 9) = wandSet.levels[i].id;
+			return;
+		}
+		r -= wandSet.levels[i].prob;
+	}
+}
 
 __device__ size_t sizeOfChest() {
 	return 9 + maxChestContents;
@@ -1152,7 +1186,8 @@ __global__ void blockCheckSpawnables(
 	byte* validBlock,
 	byte greedCurse,
 	byte checkItems,
-	byte expandSpells) {
+	byte expandSpells,
+	byte checkWands) {
 	uint index = blockIdx.x * blockDim.x + threadIdx.x;
 	uint stride = blockDim.x * gridDim.x;
 	for (int idx = index; idx < worldSeedCount; idx += stride) {
@@ -1164,7 +1199,7 @@ __global__ void blockCheckSpawnables(
 			int chestIdx = 0;
 			bool densityExceeded = false;
 
-			void (*spawnFuncs[5])(int, int, uint, byte, byte, byte*) = { spawnHeart, spawnChest, spawnPixelScene1, spawnOilTank, spawnPotion };
+			void (*spawnFuncs[6])(int, int, uint, byte, byte, byte*) = { spawnHeart, spawnChest, spawnPixelScene1, spawnOilTank, spawnPotion, spawnWand };
 
 			for (int px = 0; px < map_w; px++)
 			{
@@ -1199,6 +1234,11 @@ __global__ void blockCheckSpawnables(
 							func = spawnFuncs[4];
 						else continue;
 						break;
+					case 0x00ff00:
+						if (checkWands > 0)
+							func = spawnFuncs[5];
+						else continue;
+						break;
 					default:
 						continue;
 					}
@@ -1231,19 +1271,50 @@ __global__ void blockCheckSpawnables(
 	}
 }
 
+__global__ void blockCheckEOE(
+	int originX,
+	int originY,
+	uint radius,
+	byte* retArray,
+	byte checkItems,
+	byte expandSpells,
+	byte tinyMode) {
+	uint index = blockIdx.x * blockDim.x + threadIdx.x;
+	uint stride = blockDim.x * gridDim.x;
+	for (int idx = index; idx < radius * radius * 4; idx += stride) {
+		byte* c = retArray + idx * sizeOfChest();
+		memset(c, 0, sizeOfChest());
+
+		int x = originX - radius + (idx % (radius * 2));
+		int y = originY - radius +  (idx / (radius * 2));
+
+		if (tinyMode > 0) {
+			writeUnalignedInt(c, x);
+			writeUnalignedInt(c + 4, y);
+			*(c + 8) = 1;
+			*(c + 9) = 64;
+		}
+		else
+			CheckGreatChestLoot(x, y, worldSeedStart, c);
+
+		if (loggingLevel >= 5) printf("Chest (%i %i) -> %i %i: %i\n", x, y, readUnalignedInt(c), readUnalignedInt(c + 4), *(c + 8));
+	}
+}
+
 extern "C" {
 #ifdef _MSC_VER
 	__declspec(dllexport)
 #else
 	__attribute__((visibility("default")))
 #endif
-	 byte** generate_block(
+	byte** generate_block(
 		byte host_tileData[],
 		uint tiles_w,
 		uint tiles_h,
 		uint _map_w,
 		uint _map_h,
 		bool _isCoalMine,
+		byte _biomeIndex,
 		int _worldX,
 		int _worldY,
 		uint _worldSeedStart,
@@ -1256,11 +1327,13 @@ extern "C" {
 		uint _maxChestsPerWorld,
 		byte _greedCurse,
 		byte _checkItems,
-		byte _expandSpells)
+		byte _expandSpells,
+		byte _checkWands)
 	{
 		checkCudaErrors(cudaMemcpyToSymbol(map_w, &_map_w, sizeof(uint)));
 		checkCudaErrors(cudaMemcpyToSymbol(map_h, &_map_h, sizeof(uint)));
 		checkCudaErrors(cudaMemcpyToSymbol(isCoalMines, &_isCoalMine, sizeof(bool)));
+		checkCudaErrors(cudaMemcpyToSymbol(biomeIndex, &_biomeIndex, sizeof(byte)));
 		checkCudaErrors(cudaMemcpyToSymbol(worldX, &_worldX, sizeof(int)));
 		checkCudaErrors(cudaMemcpyToSymbol(worldY, &_worldY, sizeof(int)));
 		checkCudaErrors(cudaMemcpyToSymbol(worldSeedStart, &_worldSeedStart, sizeof(uint)));
@@ -1353,7 +1426,7 @@ extern "C" {
 		byte* dRetArray;
 		checkCudaErrors(cudaMalloc((void**)&dRetArray, _worldSeedCount * (sizeof(uint) + (9 + _maxChestContents) * _maxChestsPerWorld * (2 * _pwCount + 1))));
 
-		blockCheckSpawnables<<<NUMBLOCKS, BLOCKSIZE >>>(dResultBlock, dRetArray, dValidBlock, _greedCurse, _checkItems, _expandSpells);
+		blockCheckSpawnables<<<NUMBLOCKS, BLOCKSIZE >>>(dResultBlock, dRetArray, dValidBlock, _greedCurse, _checkItems, _expandSpells, _checkWands);
 		checkCudaErrors(cudaDeviceSynchronize());
 
 		checkCudaErrors(cudaMemcpy(retArray, dRetArray, _worldSeedCount * (sizeof(uint) + (9 + _maxChestContents) * _maxChestsPerWorld * (2 * _pwCount + 1)), cudaMemcpyDeviceToHost));
@@ -1368,6 +1441,42 @@ extern "C" {
 		return retList;
 	}
 }
+
+extern "C" {
+#ifdef _MSC_VER
+	__declspec(dllexport)
+#else
+	__attribute__((visibility("default")))
+#endif
+		byte* search_eoe(
+			int originX,
+			int originY,
+			uint radius,
+			uint _worldSeed,
+			byte _loggingLevel,
+			uint _maxChestContents,
+			byte checkItems,
+			byte expandSpells,
+			byte tinyMode
+		) {
+		checkCudaErrors(cudaMemcpyToSymbol(worldSeedStart, &_worldSeed, sizeof(uint)));
+		checkCudaErrors(cudaMemcpyToSymbol(maxChestContents, &_maxChestContents, sizeof(uint)));
+		checkCudaErrors(cudaMemcpyToSymbol(loggingLevel, &_loggingLevel, 1));
+
+		byte* retArray = (byte*)malloc(((9 + _maxChestContents) * 4 * radius * radius));
+		byte* dRetArray;
+		checkCudaErrors(cudaMalloc((void**)&dRetArray, (9 + _maxChestContents) * 4 * radius * radius));
+
+		blockCheckEOE << <NUMBLOCKS, BLOCKSIZE >> > (originX, originY, radius, dRetArray, checkItems, expandSpells, tinyMode);
+		checkCudaErrors(cudaDeviceSynchronize());
+
+		checkCudaErrors(cudaMemcpy(retArray, dRetArray, (9 + _maxChestContents) * 4 * radius * radius, cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaFree(dRetArray));
+
+		return retArray;
+	}
+}
+
 
 //I don't trust freeing memory in C#, better to just P/Invoke the pointer back to C++ and free it there
 extern "C" {
