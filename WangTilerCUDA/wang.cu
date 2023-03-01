@@ -624,7 +624,7 @@ __device__ void CheckNormalChestLoot(int x, int y, uint worldSeed, byte expandSp
 	writeUnalignedInt(writeLoc + 4, y);
 	byte* contents = writeLoc + 9;
 	NoitaRandom random = NoitaRandom(worldSeed);
-	random.SetRandomSeed(roundRNGPos(x), y);
+	random.SetRandomSeed(roundRNGPos(x)+509.7, y+683.1);
 
 	int idx = 0;
 	int count = 1;
