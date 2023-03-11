@@ -17,13 +17,13 @@
 
 typedef unsigned char byte;
 
-__device__ __constant__ unsigned long COLOR_PURPLE = 0x7f007f;
-__device__ __constant__ unsigned long COLOR_BLACK00 = 0x000000;
-__device__ __constant__ unsigned long COLOR_BLACK01 = 0x010101;
-__device__ __constant__ unsigned long COLOR_BLACK02 = 0x020202;
-__device__ __constant__ unsigned long COLOR_WHITE = 0xffffff;
-__device__ __constant__ unsigned long COLOR_YELLOW = 0xffff00;
-__device__ __constant__ unsigned long COLOR_COFFEE = 0xc0ffee;
+#define COLOR_PURPLE 0x7f007f
+#define COLOR_BLACK00 0x000000
+#define COLOR_BLACK01 0x010101
+#define COLOR_BLACK02 0x020202
+#define COLOR_WHITE 0xffffff
+#define COLOR_YELLOW 0xffff00
+#define COLOR_COFFEE 0xc0ffee
 
 __device__ __constant__ uint map_w = 0;
 __device__ __constant__ uint map_h = 0;
@@ -273,6 +273,7 @@ void doCoalMineHax(
 				map[i + 1] = 0xFF;
 				map[i + 2] = 0xFF;
 			}
+			__syncthreads();
 		}
 	}
 }
@@ -292,9 +293,10 @@ void blockOutRooms(
 	int width,
 	int height)
 {
-	for (int y = 0; y < height - 1; y++)
+	int increment = dTileSet.short_side_len;
+	for (int y = 1; y < height - 1; y+=increment)
 	{
-		for (int x = 0; x < width; x++)
+		for (int x = 1; x < width; x+=increment)
 		{
 			long color = getPixelColor(map, width, x, y);
 			if (!contains(blockedColors, color))
@@ -349,8 +351,8 @@ const int BIOME_PATH_FIND_WORLD_POS_MAX_X = 223;
 __device__
 const int WORLD_OFFSET_X = 35;
 
-__device__ __shared__ intPair stackCache[BLOCKSIZE * 4];
-__device__ __shared__ byte stackSize[BLOCKSIZE];
+//__device__ __shared__ intPair stackCache[BLOCKSIZE * 4];
+//__device__ __shared__ byte stackSize[BLOCKSIZE];
 
 class Search
 {
@@ -366,23 +368,28 @@ public:
 	int targetY;
 	int threadIdx;
 
+	intPair stackCache[4];
+	byte stackSize;
+
 	__device__
 	void findPath(int x, int y)
 	{
+		int rmw = map_w; //register map width
+		int rmh = map_h; //register map height
 		while (queueSize > 0 && pathFound != 1)
 		{
-			stackSize[threadIdx] = 0;
+			stackSize = 0;
 			intPair n = Pop();
-			if((n.x + n.y) % 2 == 0) setPixelColor(map, map_w, n.x, n.y, COLOR_PURPLE);
+			//if((n.x + n.y) % 2 == 0) setPixelColor(map, register_mapW, n.x, n.y, COLOR_PURPLE);
 			if (n.x != -1) {
 				if (atTarget(n))
 				{
 					pathFound = 1;
 				}
-				tryNext(n.x, n.y + 1);
-				tryNext(n.x - 1, n.y);
-				tryNext(n.x + 1, n.y);
-				tryNext(n.x, n.y - 1);
+				tryNext(n.x, n.y + 1, rmw, rmh);
+				tryNext(n.x - 1, n.y, rmw, rmh);
+				tryNext(n.x + 1, n.y, rmw, rmh);
+				tryNext(n.x, n.y - 1, rmw, rmh);
 			}
 			Push();
 		}
@@ -393,27 +400,26 @@ public:
 	}
 	
 	__device__ void Push() {
-		while (stackSize[threadIdx] > 0) {
-			queueMem[queueSize++] = stackCache[4 * threadIdx + --stackSize[threadIdx]];
+		while (stackSize > 0) {
+			queueMem[queueSize++] = stackCache[--stackSize];
 		}
 	}
 
 	__device__
-	void tryNext(int x, int y)
+	void tryNext(int x, int y, int rmw, int rmh)
 	{
-		if (x >= 0 && y >= 0 && x < map_w && y < map_h) {
-			if (traversable(x, y) && visited[y * map_w + x] == 0)
+		if (x >= 0 && y >= 0 && x < rmw && y < rmh) {
+			if (visited[y * rmw + x] == 0 && traversable(x, y, rmw))
 			{
-				visited[y * map_w + x] = 1;
-				stackCache[threadIdx * 4 + stackSize[threadIdx]] = { x, y };
-				stackSize[threadIdx]++;
+				visited[y * rmw + x] = 1;
+				stackCache[stackSize++] = { x, y };
 			}
 		}
 	}
 
-	__device__ bool traversable(int x, int y)
+	__device__ bool traversable(int x, int y, int rmw)
 	{
-		long c = getPixelColor(map, map_w, x, y);
+		long c = getPixelColor(map, rmw, x, y);
 
 		return c == COLOR_BLACK00 || c == COLOR_COFFEE;
 	}
@@ -989,6 +995,7 @@ void blockRoomBlock(
 
 __global__
 void blockFillC0FFEE(
+	uint* seeds,
 	byte* block,
 	byte* validBlock,
 	byte* visitedBlock,
@@ -1002,7 +1009,7 @@ void blockFillC0FFEE(
 			byte* segment = block + idx * (3 * map_w * map_h);
 			byte* visited = visitedBlock + idx * (map_w * map_h);
 			intPair* stack = stackBlock + idx * (map_w + map_h);
-			uint worldSeed = worldSeedStart + idx;
+			uint worldSeed = seeds[idx];
 
 			memset(visited, 0, map_w * map_h);
 
@@ -1023,12 +1030,12 @@ void blockIsValid(
 	uint stride = blockDim.x * gridDim.x;
 	bool mainPath = isMainPath();
 
+
 	for (int idx = index; idx < worldSeedCount; idx += stride) {
 		if (skipValid || !validBlock[idx]) {
 			byte* mapSegment = mapBlock + idx * 3 * map_w * map_h;
 			byte* visitedSegment = sVisitedBlock + idx * map_w * map_h;
 			intPair* queueMemSegment = dQueueMem + idx * (map_w + map_h);
-			memset(visitedSegment, 0, map_w * map_h);
 
 			uint path_start_x = 0;
 			if (mainPath)
@@ -1071,11 +1078,7 @@ void blockIsValid(
 			setPixelColor(dSearch[threadIdx.x].map, map_w, x, 0, COLOR_PURPLE);
 			queueMemSegment[0] = { x, 0 };
 
-			stackSize[threadIdx.x] = 0;
-			stackCache[threadIdx.x * 4] = { -1,-1 };
-			stackCache[threadIdx.x * 4 + 1] = { -1,-1 };
-			stackCache[threadIdx.x * 4 + 2] = { -1,-1 };
-			stackCache[threadIdx.x * 4 + 3] = { -1,-1 };
+			dSearch[threadIdx.x].stackSize = 0;
 
 			dSearch[threadIdx.x].findPath(path_start_x, 0);
 
@@ -1102,14 +1105,14 @@ void blockCoalMineHax(
 
 __global__
 void blockInitRNG(
+	uint* seeds,
 	NollaPrng* rngBlock1,
 	NollaPrng* rngBlock2)
 {
 	uint index = blockIdx.x * blockDim.x + threadIdx.x;
 	uint stride = blockDim.x * gridDim.x;
 	for (int idx = index; idx < worldSeedCount; idx += stride) {
-		uint worldSeed = worldSeedStart + idx;
-
+		uint worldSeed = seeds[idx];
 		rngBlock1[idx] = GetRNG(map_w, worldSeed);
 		rngBlock2[idx] = NollaPrng(0);
 	}
@@ -1181,6 +1184,7 @@ void blockMemcpyOffset(
 
 //prepare your eyes for some of the most horrific pointer code ever created
 __global__ void blockCheckSpawnables(
+	uint* seeds,
 	byte* mapBlock,
 	byte* retArray,
 	byte* validBlock,
@@ -1194,7 +1198,7 @@ __global__ void blockCheckSpawnables(
 		byte* retSegment = retArray + idx * sizeOfChestSegment();
 		memset(retSegment, 0, sizeOfChestSegment());
 		if (validBlock[idx]) {
-			uint worldSeed = worldSeedStart + idx;
+			uint worldSeed = seeds[idx];
 			byte* map = mapBlock + idx * (3 * map_w * map_h);
 			int chestIdx = 0;
 			bool densityExceeded = false;
@@ -1309,6 +1313,7 @@ extern "C" {
 #endif
 	byte** generate_block(
 		byte host_tileData[],
+		uint seeds[],
 		uint tiles_w,
 		uint tiles_h,
 		uint _map_w,
@@ -1351,6 +1356,7 @@ extern "C" {
 		checkCudaErrors(cudaDeviceSynchronize());
 		checkCudaErrors(cudaFree(dTileData));
 
+		uint* dSeeds;
 		byte* resultBlock = (byte*)malloc(3 * _map_w * _map_h * _worldSeedCount);
 		byte* validBlock = (byte*)malloc(_worldSeedCount);
 
@@ -1361,6 +1367,9 @@ extern "C" {
 		byte* dValidBlock;
 		intPair* dStackMem;
 
+		checkCudaErrors(cudaMalloc((void**)&dSeeds, sizeof(uint) * _worldSeedCount));
+		checkCudaErrors(cudaMemcpy(dSeeds, seeds, sizeof(uint) * _worldSeedCount, cudaMemcpyHostToDevice));
+
 		checkCudaErrors(cudaMalloc((void**)&rngBlock1, sizeof(NollaPrng) * _worldSeedCount));
 		checkCudaErrors(cudaMalloc((void**)&rngBlock2, sizeof(NollaPrng) * _worldSeedCount));
 		checkCudaErrors(cudaMalloc((void**)&dResultBlock, 3 * _map_w * _map_h * _worldSeedCount));
@@ -1370,7 +1379,7 @@ extern "C" {
 
 		checkCudaErrors(cudaMemset(dValidBlock, 0, _worldSeedCount));
 
-		blockInitRNG<<<NUMBLOCKS, BLOCKSIZE>>>(rngBlock1, rngBlock2);
+		blockInitRNG<<<NUMBLOCKS, BLOCKSIZE>>>(dSeeds, rngBlock1, rngBlock2);
 		checkCudaErrors(cudaDeviceSynchronize());
 
 		bool stop = false;
@@ -1400,6 +1409,7 @@ extern "C" {
 				checkCudaErrors(cudaDeviceSynchronize());
 			}
 
+			checkCudaErrors(cudaMemset(dResBlock, 0, _worldSeedCount * _map_w * _map_h));
 			blockIsValid<<<NUMBLOCKS, BLOCKSIZE>>>(dResultBlock, dValidBlock, dResBlock, dStackMem, skipValid);
 			checkCudaErrors(cudaDeviceSynchronize());
 
@@ -1426,7 +1436,7 @@ extern "C" {
 		byte* dRetArray;
 		checkCudaErrors(cudaMalloc((void**)&dRetArray, _worldSeedCount * (sizeof(uint) + (9 + _maxChestContents) * _maxChestsPerWorld * (2 * _pwCount + 1))));
 
-		blockCheckSpawnables<<<NUMBLOCKS, BLOCKSIZE >>>(dResultBlock, dRetArray, dValidBlock, _greedCurse, _checkItems, _expandSpells, _checkWands);
+		blockCheckSpawnables<<<NUMBLOCKS, BLOCKSIZE >>>(dSeeds, dResultBlock, dRetArray, dValidBlock, _greedCurse, _checkItems, _expandSpells, _checkWands);
 		checkCudaErrors(cudaDeviceSynchronize());
 
 		checkCudaErrors(cudaMemcpy(retArray, dRetArray, _worldSeedCount * (sizeof(uint) + (9 + _maxChestContents) * _maxChestsPerWorld * (2 * _pwCount + 1)), cudaMemcpyDeviceToHost));
