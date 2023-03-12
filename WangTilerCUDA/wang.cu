@@ -594,6 +594,11 @@ __host__ __device__ int roundRNGPos(int num) {
 // 46 egg_monster
 // 47 broken_wand
 // 
+// 48 chest_mimic
+// 49 chest_mimic_sign
+// 50 chest_mimic_fake_sign
+// 51 chest_leggy
+// 
 // 64 wand_T10NS
 // 65 wand_T1B
 // 66 wand_T2B
@@ -632,7 +637,7 @@ __device__ void CheckNormalChestLoot(int x, int y, uint worldSeed, byte expandSp
 	NoitaRandom random = NoitaRandom(worldSeed);
 	random.SetRandomSeed(roundRNGPos(x)+509.7, y+683.1);
 
-	int idx = 0;
+	int idx = *(writeLoc + 8);
 	int count = 1;
 	while (count > 0)
 	{
@@ -767,7 +772,7 @@ __device__ void CheckGreatChestLoot(int x, int y, uint worldSeed, byte* writeLoc
 	NoitaRandom random = NoitaRandom(worldSeed);
 	random.SetRandomSeed(roundRNGPos(x), y);
 
-	int idx = 0;
+	int idx = *(writeLoc + 8);
 	int count = 1;
 
 	if (random.Random(0, 100000) >= 100000)
@@ -877,19 +882,32 @@ __device__ void spawnHeart(int x, int y, uint seed, byte greedCurse, byte expand
 	if (loggingLevel >= 5) printf("Spawning heart: %i, %i\n", x, y);
 	float r = random.ProceduralRandomf(x, y, 0, 1);
 	float heart_spawn_percent = 0.7f;
-
+	
 	if (r <= heart_spawn_percent && r > 0.3)
 	{
 		random.SetRandomSeed(x + 45, y - 2123);
 		int rnd = random.Random(1, 100);
+		*(writeLoc + 8) = 0;
 		if (rnd <= 90 || y < 512 * 3)
 		{
 			rnd = random.Random(1, 1000);
-
+			if (random.Random(1, 300) == 1) {
+				writeLoc[(*(writeLoc + 8))++ + 9] = 50;
+			}
 			if (rnd >= 1000)
 				CheckGreatChestLoot(x, y, seed, writeLoc);
 			else 
 				CheckNormalChestLoot(x, y, seed, expandSpells, writeLoc);
+		}
+		else {
+			rnd = random.Random(1, 100);
+			if (random.Random(1, 30) == 1)
+				writeLoc[(*(writeLoc + 8))++ + 9] = 49;
+
+			if (rnd <= 95)
+				writeLoc[(*(writeLoc + 8))++ + 9] = 48;
+			else
+				writeLoc[(*(writeLoc + 8))++ + 9] = 51;
 		}
 	}
 }
